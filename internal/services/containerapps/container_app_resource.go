@@ -55,6 +55,10 @@ var _ sdk.ResourceWithUpdate = ContainerAppResource{}
 
 var _ sdk.ResourceWithCustomizeDiff = ContainerAppResource{}
 
+// ResourceWithStateMigration is implemented because the env block was changed from
+// TypeList to TypeSet and the secret set now uses a custom hash function. Existing
+// state must be migrated so Terraform knows to refresh rather than error on the
+// schema type change.
 var _ sdk.ResourceWithStateMigration = ContainerAppResource{}
 
 func (r ContainerAppResource) ModelObject() interface{} {
@@ -261,6 +265,9 @@ func (r ContainerAppResource) Read() sdk.ResourceFunc {
 			}
 
 			var state ContainerAppModel
+
+			// Decode the prior state so we can carry forward secret values that
+			// the API redacts during Read. See PreserveContainerAppSecretValues.
 			var priorState ContainerAppModel
 			if err := metadata.Decode(&priorState); err != nil {
 				return err
@@ -310,6 +317,8 @@ func (r ContainerAppResource) Read() sdk.ResourceFunc {
 			}
 
 			state.Secrets = helpers.FlattenContainerAppSecrets(secretsResp.Model)
+			// The Azure API redacts secret values on read — carry forward the
+			// values from the prior state so Terraform doesn't see them as changed.
 			state.Secrets = helpers.PreserveContainerAppSecretValues(state.Secrets, priorState.Secrets)
 
 			return metadata.Encode(&state)
@@ -480,6 +489,12 @@ func (r ContainerAppResource) CustomizeDiff() sdk.ResourceFunc {
 	}
 }
 
+// StateUpgraders defines the state migration from schema version 0 to 1.
+// The migration is needed because env blocks changed from TypeList to TypeSet
+// and the secret set now uses a custom hash function (containerSecretHash).
+// The upgrade function itself is a pass-through — Terraform handles the type
+// conversion automatically during state refresh. The migration's purpose is to
+// bump the schema version so Terraform knows a refresh is needed.
 func (r ContainerAppResource) StateUpgraders() sdk.StateUpgradeData {
 	return sdk.StateUpgradeData{
 		SchemaVersion: 1,

@@ -437,6 +437,9 @@ func flattenInitContainerAppJobContainers(input *[]jobs.BaseContainer) []BaseCon
 	return result
 }
 
+// expandContainerJobEnvVar converts job container env vars from the Terraform model to the
+// Azure SDK type. See expandInitContainerEnvVar in container_apps.go for details on sorting
+// and empty-name filtering — the same logic is applied here for the jobs SDK type.
 func expandContainerJobEnvVar(input Container) *[]jobs.EnvironmentVar {
 	envs := make([]jobs.EnvironmentVar, 0)
 	if len(input.Env) == 0 {
@@ -467,6 +470,9 @@ func expandContainerJobEnvVar(input Container) *[]jobs.EnvironmentVar {
 	return &envs
 }
 
+// expandInitContainerJobEnvVar converts job init container env vars from the Terraform model
+// to the Azure SDK type. See expandInitContainerEnvVar in container_apps.go for details on
+// sorting and empty-name filtering.
 func expandInitContainerJobEnvVar(input BaseContainer) *[]jobs.EnvironmentVar {
 	envs := make([]jobs.EnvironmentVar, 0)
 	if len(input.Env) == 0 {
@@ -693,6 +699,9 @@ func UnpackContainerJobSecretsCollection(input *jobs.JobSecretsCollection) *[]jo
 	return &result
 }
 
+// flattenContainerJobEnvVar converts job env vars from the Azure SDK type back to the
+// Terraform model. Entries with blank names are filtered out as a defensive measure
+// against phantom empty set elements. See flattenContainerEnvVar in container_apps.go.
 func flattenContainerJobEnvVar(input *[]jobs.EnvironmentVar) []ContainerEnvVar {
 	if input == nil || len(*input) == 0 {
 		return []ContainerEnvVar{}
@@ -1030,6 +1039,9 @@ func flattenContainerAppJobScaleRulesAuth(input *[]jobs.ScaleRuleAuth) []ScaleRu
 	return result
 }
 
+// FlattenContainerAppJobSecrets converts job secrets from the Azure API response back to
+// the Terraform model. See FlattenContainerAppSecrets in container_apps.go for details on
+// KeyVaultURL normalization and why strings.TrimSpace is used instead of a nil check.
 func FlattenContainerAppJobSecrets(input *jobs.JobSecretsCollection) []Secret {
 	if input == nil || input.Value == nil {
 		return []Secret{}

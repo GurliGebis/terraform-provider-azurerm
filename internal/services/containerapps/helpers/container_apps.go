@@ -1847,6 +1847,16 @@ type ContainerEnvVar struct {
 	SecretReference string `tfschema:"secret_name"`
 }
 
+// ContainerEnvVarSchema returns the schema for container environment variables.
+//
+// This uses TypeSet (not TypeList) so that the order of env blocks in HCL config
+// does not matter. With TypeList, reordering env blocks — or the API returning them
+// in a different order — caused noisy remove/re-add diffs on every plan.
+// See: https://github.com/hashicorp/terraform-provider-azurerm/issues/29743
+//
+// The set uses containerEnvVarHash to identify elements by name+value (or
+// name+secret_name), so changing a value produces a targeted update rather than
+// a full remove+re-add of the element.
 func ContainerEnvVarSchema() *pluginsdk.Schema {
 	return &pluginsdk.Schema{
 		Type:     pluginsdk.TypeSet,
@@ -1864,6 +1874,10 @@ func ContainerEnvVarSchema() *pluginsdk.Schema {
 				"value": {
 					Type:     pluginsdk.TypeString,
 					Optional: true,
+					// DiffSuppressFunc: when secret_name is set, the value field is irrelevant.
+					// The API may return inconsistent values for this field in that case,
+					// which would cause false diffs. Suppress any diff on value when the
+					// env var is secret-backed.
 					DiffSuppressFunc: func(k, oldValue, newValue string, d *pluginsdk.ResourceData) bool {
 						secretNamePath := strings.TrimSuffix(k, ".value") + ".secret_name"
 						if secretName, ok := d.Get(secretNamePath).(string); ok && secretName != "" {
@@ -1878,6 +1892,11 @@ func ContainerEnvVarSchema() *pluginsdk.Schema {
 				"secret_name": {
 					Type:     pluginsdk.TypeString,
 					Optional: true,
+					// DiffSuppressFunc: when value is set, secret_name is irrelevant.
+					// The API may return null or empty for secret_name in that case.
+					// Also suppress diffs when both old and new are empty/blank, which
+					// can happen due to null vs empty string differences between state
+					// and config.
 					DiffSuppressFunc: func(k, oldValue, newValue string, d *pluginsdk.ResourceData) bool {
 						if strings.TrimSpace(oldValue) == "" && strings.TrimSpace(newValue) == "" {
 							return true
@@ -1897,6 +1916,9 @@ func ContainerEnvVarSchema() *pluginsdk.Schema {
 	}
 }
 
+// ContainerEnvVarSchemaComputed returns the computed (read-only) schema for env vars,
+// used by data sources. Uses the same TypeSet and hash function as ContainerEnvVarSchema
+// for consistency.
 func ContainerEnvVarSchemaComputed() *pluginsdk.Schema {
 	return &pluginsdk.Schema{
 		Type:     pluginsdk.TypeSet,
@@ -1926,6 +1948,11 @@ func ContainerEnvVarSchemaComputed() *pluginsdk.Schema {
 	}
 }
 
+// expandInitContainerEnvVar converts init container env vars from the Terraform model to the
+// Azure SDK type. The input is copied and sorted deterministically before expansion, so
+// that the API always receives env vars in the same order regardless of HCL block ordering.
+// Entries with blank names are skipped as a defensive measure against phantom empty set
+// elements that can appear when the SDK processes empty TypeSet entries.
 func expandInitContainerEnvVar(input BaseContainer) *[]containerapps.EnvironmentVar {
 	envs := make([]containerapps.EnvironmentVar, 0)
 	if len(input.Env) == 0 {
@@ -1956,6 +1983,8 @@ func expandInitContainerEnvVar(input BaseContainer) *[]containerapps.Environment
 	return &envs
 }
 
+// expandContainerEnvVar converts container env vars from the Terraform model to the Azure
+// SDK type. See expandInitContainerEnvVar for details on sorting and empty-name filtering.
 func expandContainerEnvVar(input Container) *[]containerapps.EnvironmentVar {
 	envs := make([]containerapps.EnvironmentVar, 0)
 	if len(input.Env) == 0 {
@@ -1986,6 +2015,9 @@ func expandContainerEnvVar(input Container) *[]containerapps.EnvironmentVar {
 	return &envs
 }
 
+// flattenContainerEnvVar converts env vars from the Azure SDK type back to the Terraform
+// model. Entries with blank names are filtered out, and the result is sorted to ensure
+// deterministic ordering regardless of the order the API returns them.
 func flattenContainerEnvVar(input *[]containerapps.EnvironmentVar) []ContainerEnvVar {
 	if input == nil || len(*input) == 0 {
 		return []ContainerEnvVar{}
@@ -2010,6 +2042,9 @@ func flattenContainerEnvVar(input *[]containerapps.EnvironmentVar) []ContainerEn
 	return result
 }
 
+// sortContainerEnvVars sorts env vars deterministically by name, then secret_name, then
+// value. This ensures expand and flatten always produce the same ordering regardless of
+// the order in HCL config or the order the API returns them.
 func sortContainerEnvVars(input []ContainerEnvVar) {
 	sort.Slice(input, func(i, j int) bool {
 		if input[i].Name != input[j].Name {
@@ -2906,6 +2941,15 @@ type Secret struct {
 	Value            string `tfschema:"value"`
 }
 
+// containerEnvVarHash computes the set hash for an env var element.
+//
+// The hash includes both name and value (or name and secret_name for secret-backed envs),
+// so that two env entries are only considered identical if they have the same name AND the
+// same value/secret_name. This means changing a value produces a targeted in-place update
+// rather than a full remove+re-add of the set element.
+//
+// Env names are case-sensitive because Azure Container Apps treats "FOO" and "foo" as
+// distinct environment variables.
 func containerEnvVarHash(input interface{}) int {
 	if input == nil {
 		return 0
@@ -2927,6 +2971,16 @@ func containerEnvVarHash(input interface{}) int {
 	return pluginsdk.HashString(strings.Join([]string{name, value}, "\x00"))
 }
 
+// containerSecretHash computes the set hash for a secret element using name only.
+//
+// Secret names are unique within a container app, so name alone is a stable identity.
+// This means changing a secret's value, Key Vault reference, or identity produces an
+// in-place update rather than a remove+re-add of the set element.
+//
+// Previously the secret set relied on the SDK's default hash (all fields), which caused
+// every secret to appear changed on every plan because the Azure API redacts secret
+// values on read (returns empty string instead of the configured value).
+// See: https://github.com/hashicorp/terraform-provider-azurerm/issues/31376
 func containerSecretHash(input interface{}) int {
 	if input == nil {
 		return 0
@@ -2942,6 +2996,25 @@ func containerSecretHash(input interface{}) int {
 	return pluginsdk.HashString(name)
 }
 
+// SecretsSchema returns the schema for container app secrets.
+//
+// This uses TypeSet with containerSecretHash (name-only) so that:
+// - Reordering secret blocks in HCL does not cause diffs
+// - Changing a secret's value does not cause remove+re-add (just an update)
+//
+// The set-level Sensitive flag was intentionally removed. Previously it was set on the
+// entire set, which prevented Terraform from showing useful element-matching diffs. Now
+// only the "value" field is marked Sensitive.
+//
+// The optional fields (identity, key_vault_secret_id, value) use Default: "" to prevent
+// a null vs empty string mismatch in cty.Value that caused phantom diffs. When these
+// optional fields are omitted from HCL, the SDK's config reader returns Exists: false
+// (nil). During diff computation for set elements, this causes the planned flatmap to
+// omit these keys entirely, which converts to cty.NullVal(cty.String). But the prior
+// state (from Read) has them as cty.StringVal(""). Since null != "" in cty sets,
+// Terraform sees them as different set elements and generates remove+re-add for ALL
+// secrets. Setting Default: "" makes the config reader return "" instead of nil,
+// preventing this mismatch.
 func SecretsSchema() *pluginsdk.Schema {
 	s := &pluginsdk.Schema{
 		Type:     pluginsdk.TypeSet,
@@ -2952,7 +3025,7 @@ func SecretsSchema() *pluginsdk.Schema {
 				"identity": {
 					Type:     pluginsdk.TypeString,
 					Optional: true,
-					Default:  "",
+					Default:  "", // Prevent null vs empty string mismatch — see SecretsSchema doc above
 					ValidateFunc: validation.Any(
 						commonids.ValidateUserAssignedIdentityID,
 						validation.StringInSlice([]string{"System"}, false),
@@ -2963,7 +3036,7 @@ func SecretsSchema() *pluginsdk.Schema {
 				"key_vault_secret_id": {
 					Type:         pluginsdk.TypeString,
 					Optional:     true,
-					Default:      "",
+					Default:      "", // Prevent null vs empty string mismatch — see SecretsSchema doc above
 					ValidateFunc: keyvault.ValidateNestedItemID(keyvault.VersionTypeAny, keyvault.NestedItemTypeSecret),
 					Description:  "The Key Vault Secret ID. Could be either one of `id` or `versionless_id`.",
 				},
@@ -2978,7 +3051,7 @@ func SecretsSchema() *pluginsdk.Schema {
 				"value": {
 					Type:        pluginsdk.TypeString,
 					Optional:    true,
-					Default:     "",
+					Default:     "", // Prevent null vs empty string mismatch — see SecretsSchema doc above
 					Sensitive:   true,
 					Description: "The value for this secret.",
 				},
@@ -2993,6 +3066,8 @@ func SecretsSchema() *pluginsdk.Schema {
 	return s
 }
 
+// SecretsDataSourceSchema returns the schema for reading secrets in data sources.
+// Uses containerSecretHash for consistent set identity with the resource schema.
 func SecretsDataSourceSchema() *pluginsdk.Schema {
 	return &pluginsdk.Schema{
 		Type:      pluginsdk.TypeSet,
@@ -3030,6 +3105,9 @@ func SecretsDataSourceSchema() *pluginsdk.Schema {
 	}
 }
 
+// ExpandContainerSecrets converts secrets from the Terraform model to the Azure SDK type.
+// The input is copied and sorted deterministically before expansion, so that the API
+// always receives secrets in the same order regardless of HCL block ordering.
 func ExpandContainerSecrets(input []Secret) (*[]containerapps.Secret, error) {
 	if len(input) == 0 {
 		return nil, nil
@@ -3104,6 +3182,16 @@ func ExpandDaprSecrets(input []DaprSecret) *[]daprcomponents.Secret {
 	return &result
 }
 
+// FlattenContainerAppSecrets converts secrets from the Azure API response back to the
+// Terraform model.
+//
+// KeyVaultURL and Identity are trimmed with strings.TrimSpace() because the Azure API
+// sometimes returns "" instead of nil for KeyVaultURL on value-backed secrets. The
+// previous code used `if v.KeyVaultURL == nil` to detect value-backed secrets, which
+// missed the blank-string case and incorrectly treated them as Key Vault secrets
+// (suppressing the value field).
+//
+// The result is sorted to ensure deterministic ordering regardless of API return order.
 func FlattenContainerAppSecrets(input *containerapps.SecretsCollection) []Secret {
 	if input == nil || input.Value == nil {
 		return []Secret{}
@@ -3129,6 +3217,18 @@ func FlattenContainerAppSecrets(input *containerapps.SecretsCollection) []Secret
 	return result
 }
 
+// PreserveContainerAppSecretValues carries forward secret values from the prior Terraform
+// state when the Azure API returns empty values during Read.
+//
+// The Azure ListSecrets API does not return the plain-text value for value-backed secrets
+// (it redacts/omits them). Without this function, Terraform would see the value disappear
+// between apply and the next plan, causing perpetual diffs.
+//
+// Only value-backed secrets (those without a key_vault_secret_id) have their values
+// preserved. Key Vault-backed secrets never store a local value, so they are skipped.
+//
+// This is called in both ContainerAppResource.Read() and ContainerAppJobResource.Read()
+// after flattening the secrets from the API response.
 func PreserveContainerAppSecretValues(current []Secret, prior []Secret) []Secret {
 	if len(current) == 0 || len(prior) == 0 {
 		return current
@@ -3168,6 +3268,9 @@ func PreserveContainerAppSecretValues(current []Secret, prior []Secret) []Secret
 	return result
 }
 
+// sortContainerSecrets sorts secrets deterministically by name, then identity, then
+// key_vault_secret_id, then value. This ensures expand and flatten always produce the
+// same ordering regardless of the order in HCL config or the order the API returns them.
 func sortContainerSecrets(input []Secret) {
 	sort.Slice(input, func(i, j int) bool {
 		if input[i].Name != input[j].Name {

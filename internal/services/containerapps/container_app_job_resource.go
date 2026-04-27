@@ -51,6 +51,10 @@ type ContainerAppJobModel struct {
 }
 
 var _ sdk.ResourceWithUpdate = ContainerAppJobResource{}
+
+// ResourceWithStateMigration is implemented because the env block was changed from
+// TypeList to TypeSet and the secret set now uses a custom hash function. See
+// ContainerAppResource for the same pattern.
 var _ sdk.ResourceWithStateMigration = ContainerAppJobResource{}
 
 func (r ContainerAppJobResource) ModelObject() interface{} {
@@ -222,6 +226,8 @@ func (r ContainerAppJobResource) Attributes() map[string]*schema.Schema {
 	}
 }
 
+// StateUpgraders defines the state migration from schema version 0 to 1.
+// See ContainerAppResource.StateUpgraders for details on why this is needed.
 func (r ContainerAppJobResource) StateUpgraders() sdk.StateUpgradeData {
 	return sdk.StateUpgradeData{
 		SchemaVersion: 1,
@@ -333,6 +339,9 @@ func (r ContainerAppJobResource) Read() sdk.ResourceFunc {
 			}
 
 			var state ContainerAppJobModel
+
+			// Decode the prior state so we can carry forward secret values that
+			// the API redacts during Read. See PreserveContainerAppSecretValues.
 			var priorState ContainerAppJobModel
 			if err := metadata.Decode(&priorState); err != nil {
 				return err
@@ -386,6 +395,8 @@ func (r ContainerAppJobResource) Read() sdk.ResourceFunc {
 				return fmt.Errorf("listing secrets for %s: %+v", *id, err)
 			}
 			state.Secrets = helpers.FlattenContainerAppJobSecrets(secretResp.Model)
+			// The Azure API redacts secret values on read — carry forward the
+			// values from the prior state so Terraform doesn't see them as changed.
 			state.Secrets = helpers.PreserveContainerAppSecretValues(state.Secrets, priorState.Secrets)
 
 			return metadata.Encode(&state)
