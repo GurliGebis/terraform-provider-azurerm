@@ -443,7 +443,15 @@ func expandContainerJobEnvVar(input Container) *[]jobs.EnvironmentVar {
 		return &envs
 	}
 
-	for _, v := range input.Env {
+	envInput := make([]ContainerEnvVar, len(input.Env))
+	copy(envInput, input.Env)
+	sortContainerEnvVars(envInput)
+
+	for _, v := range envInput {
+		if strings.TrimSpace(v.Name) == "" {
+			continue
+		}
+
 		env := jobs.EnvironmentVar{
 			Name: pointer.To(v.Name),
 		}
@@ -465,7 +473,15 @@ func expandInitContainerJobEnvVar(input BaseContainer) *[]jobs.EnvironmentVar {
 		return &envs
 	}
 
-	for _, v := range input.Env {
+	envInput := make([]ContainerEnvVar, len(input.Env))
+	copy(envInput, input.Env)
+	sortContainerEnvVars(envInput)
+
+	for _, v := range envInput {
+		if strings.TrimSpace(v.Name) == "" {
+			continue
+		}
+
 		env := jobs.EnvironmentVar{
 			Name: pointer.To(v.Name),
 		}
@@ -685,6 +701,10 @@ func flattenContainerJobEnvVar(input *[]jobs.EnvironmentVar) []ContainerEnvVar {
 	result := make([]ContainerEnvVar, 0)
 
 	for _, v := range *input {
+		if strings.TrimSpace(pointer.From(v.Name)) == "" {
+			continue
+		}
+
 		result = append(result, ContainerEnvVar{
 			Name:            pointer.From(v.Name),
 			SecretReference: pointer.From(v.SecretRef),
@@ -1018,12 +1038,15 @@ func FlattenContainerAppJobSecrets(input *jobs.JobSecretsCollection) []Secret {
 	result := make([]Secret, 0)
 
 	for _, v := range input.Value {
+		keyVaultSecretId := strings.TrimSpace(pointer.From(v.KeyVaultURL))
+		identity := strings.TrimSpace(pointer.From(v.Identity))
+
 		secret := Secret{
-			Identity:         pointer.From(v.Identity),
-			KeyVaultSecretId: pointer.From(v.KeyVaultURL),
+			Identity:         identity,
+			KeyVaultSecretId: keyVaultSecretId,
 			Name:             pointer.From(v.Name),
 		}
-		if v.KeyVaultURL == nil {
+		if keyVaultSecretId == "" {
 			secret.Value = pointer.From(v.Value)
 		}
 		result = append(result, secret)
