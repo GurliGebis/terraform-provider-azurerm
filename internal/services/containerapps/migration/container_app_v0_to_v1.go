@@ -13,6 +13,9 @@ import (
 
 type ContainerAppV0ToV1 struct{}
 
+// envSchemaV0 is a point-in-time snapshot of the env schema as it existed before
+// the v0→v1 migration. It must remain static: TypeList, MinItems:1, no Default.
+// Terraform uses this to decode the existing state before UpgradeFunc runs.
 func envSchemaV0() *pluginsdk.Schema {
 	return &pluginsdk.Schema{
 		Type:     pluginsdk.TypeList,
@@ -37,6 +40,9 @@ func envSchemaV0() *pluginsdk.Schema {
 	}
 }
 
+// secretSchemaV0 is a point-in-time snapshot of the secret schema before v1.
+// Key differences from v1: set-level Sensitive:true, no Default:"" on optional
+// fields, no custom hash function.
 func secretSchemaV0() *pluginsdk.Schema {
 	return &pluginsdk.Schema{
 		Type:      pluginsdk.TypeSet,
@@ -166,6 +172,9 @@ func (ContainerAppV0ToV1) UpgradeFunc() pluginsdk.StateUpgraderFunc {
 	}
 }
 
+// normalizeEnvVars converts nil values to "" for env var fields that gained
+// Default:"" in v1. The Terraform SDK does not apply schema defaults during
+// state migration, so we must do this explicitly.
 func normalizeEnvVars(rawState map[string]interface{}) {
 	templates, _ := rawState["template"].([]interface{})
 	for _, tmpl := range templates {
@@ -198,6 +207,8 @@ func normalizeEnvVars(rawState map[string]interface{}) {
 	}
 }
 
+// normalizeSecrets converts nil values to "" for secret fields that gained
+// Default:"" in v1 (identity, key_vault_secret_id, value).
 func normalizeSecrets(rawState map[string]interface{}) {
 	secrets, _ := rawState["secret"].([]interface{})
 	for _, s := range secrets {

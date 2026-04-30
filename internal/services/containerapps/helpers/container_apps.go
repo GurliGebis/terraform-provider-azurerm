@@ -1846,6 +1846,16 @@ type ContainerEnvVar struct {
 	SecretReference string `tfschema:"secret_name"`
 }
 
+// ContainerEnvVarSchema returns the schema for container environment variables.
+//
+// This uses TypeSet (not TypeList) so that the order of env blocks in HCL config
+// does not matter. With TypeList, reordering env blocks — or the API returning them
+// in a different order — caused noisy remove/re-add diffs on every plan.
+// See: https://github.com/hashicorp/terraform-provider-azurerm/issues/29743
+//
+// The set uses containerEnvVarHash to identify elements by name+value (or
+// name+secret_name for secret-backed vars), so changing a value produces a targeted
+// update rather than a full remove+re-add of the element.
 func ContainerEnvVarSchema() *pluginsdk.Schema {
 	return &pluginsdk.Schema{
 		Type:     pluginsdk.TypeSet,
@@ -1863,6 +1873,9 @@ func ContainerEnvVarSchema() *pluginsdk.Schema {
 				"value": {
 					Type:     pluginsdk.TypeString,
 					Optional: true,
+					// DiffSuppressFunc: when secret_name is set, the value field is irrelevant.
+					// The API may return inconsistent values for this field in that case,
+					// which would cause false diffs.
 					DiffSuppressFunc: func(k, oldValue, newValue string, d *pluginsdk.ResourceData) bool {
 						secretNamePath := strings.TrimSuffix(k, ".value") + ".secret_name"
 						if secretName, ok := d.Get(secretNamePath).(string); ok && secretName != "" {
@@ -1877,6 +1890,9 @@ func ContainerEnvVarSchema() *pluginsdk.Schema {
 				"secret_name": {
 					Type:     pluginsdk.TypeString,
 					Optional: true,
+					// DiffSuppressFunc: when value is set, the secret_name field is irrelevant.
+					// Also suppresses diffs where both old and new are effectively empty
+					// (nil vs "" caused by Terraform's null-handling for optional fields).
 					DiffSuppressFunc: func(k, oldValue, newValue string, d *pluginsdk.ResourceData) bool {
 						if strings.TrimSpace(oldValue) == "" && strings.TrimSpace(newValue) == "" {
 							return true
@@ -2871,6 +2887,10 @@ type Secret struct {
 	Value            string `tfschema:"value"`
 }
 
+// containerEnvVarHash produces a stable hash for an env var set element.
+// The hash includes a type discriminator ("value" or "secret") between name and
+// the actual value/secret_name. This prevents collisions where a plain value
+// happens to equal a secret name (e.g., name=X value=Y vs name=X secret_name=Y).
 func containerEnvVarHash(input interface{}) int {
 	if input == nil {
 		return 0
@@ -2892,6 +2912,10 @@ func containerEnvVarHash(input interface{}) int {
 	return pluginsdk.HashString(strings.Join([]string{name, "value", value}, "\x00"))
 }
 
+// containerSecretHash identifies secrets by name only. The API never returns
+// plain-text secret values, so including value in the hash would cause permanent
+// diffs. Key Vault-backed secrets are also identified by name alone since the
+// vault URL and identity are mutable properties of the same logical secret.
 func containerSecretHash(input interface{}) int {
 	if input == nil {
 		return 0
@@ -2907,6 +2931,15 @@ func containerSecretHash(input interface{}) int {
 	return pluginsdk.HashString(name)
 }
 
+// SecretsSchema returns the schema for the secret block.
+//
+// Key design decisions:
+//   - TypeSet with containerSecretHash (name-only) so ordering doesn't matter.
+//   - All optional string fields have Default:"" to prevent null-vs-empty diffs
+//     that caused the full set to be removed and re-added on every plan.
+//   - Sensitive is set only on the value field (not the whole set) to allow
+//     Terraform to show which secret changed by name.
+//   - See: https://github.com/hashicorp/terraform-provider-azurerm/issues/31376
 func SecretsSchema() *pluginsdk.Schema {
 	s := &pluginsdk.Schema{
 		Type:     pluginsdk.TypeSet,
@@ -2918,6 +2951,8 @@ func SecretsSchema() *pluginsdk.Schema {
 					Type:     pluginsdk.TypeString,
 					Optional: true,
 					Default:  "",
+					// Case-insensitive comparison: Azure portal and API may return
+					// resource IDs with inconsistent casing for the same identity.
 					DiffSuppressFunc: func(k, oldValue, newValue string, d *pluginsdk.ResourceData) bool {
 						return strings.EqualFold(oldValue, newValue)
 					},
@@ -3068,6 +3103,10 @@ func ExpandDaprSecrets(input []DaprSecret) *[]daprcomponents.Secret {
 	return &result
 }
 
+// FlattenContainerAppSecrets converts the API response into our Secret model.
+// Note: the API never returns plain-text values for secrets. For Key Vault secrets
+// the API may return an empty string instead of nil for KeyVaultURL; we use
+// strings.TrimSpace to normalize this to "" so it matches state.
 func FlattenContainerAppSecrets(input *containerapps.SecretsCollection) []Secret {
 	if input == nil || input.Value == nil {
 		return []Secret{}
@@ -3091,6 +3130,9 @@ func FlattenContainerAppSecrets(input *containerapps.SecretsCollection) []Secret
 	return result
 }
 
+// PreserveContainerAppSecretValues carries forward secret values from prior state
+// into the freshly-read secrets (which lack values since the API doesn't return them).
+// Without this, every refresh would show value="" → value="actual" diffs.
 func PreserveContainerAppSecretValues(current []Secret, prior []Secret) []Secret {
 	if len(current) == 0 || len(prior) == 0 {
 		return current
