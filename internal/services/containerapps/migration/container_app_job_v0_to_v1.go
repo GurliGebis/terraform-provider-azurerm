@@ -6,10 +6,7 @@ package migration
 import (
 	"context"
 
-	"github.com/hashicorp/go-azure-helpers/resourcemanager/commonschema"
-	"github.com/hashicorp/terraform-provider-azurerm/internal/services/containerapps/helpers"
 	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/pluginsdk"
-	"github.com/hashicorp/terraform-provider-azurerm/internal/tf/validation"
 )
 
 type ContainerAppJobV0ToV1 struct{}
@@ -71,31 +68,253 @@ func jobSecretSchemaV0() *pluginsdk.Schema {
 	}
 }
 
-func (ContainerAppJobV0ToV1) Schema() map[string]*pluginsdk.Schema {
-	templateSchema := helpers.JobTemplateSchema()
-
-	if templateResource, ok := templateSchema.Elem.(*pluginsdk.Resource); ok {
-		if containerSchema, ok := templateResource.Schema["container"]; ok {
-			if containerResource, ok := containerSchema.Elem.(*pluginsdk.Resource); ok {
-				containerResource.Schema["env"] = jobEnvSchemaV0()
-			}
-		}
-		if initContainerSchema, ok := templateResource.Schema["init_container"]; ok {
-			if initContainerResource, ok := initContainerSchema.Elem.(*pluginsdk.Resource); ok {
-				initContainerResource.Schema["env"] = jobEnvSchemaV0()
-			}
-		}
+// jobProbeHeaderSchemaV0 returns the inlined header schema shared by all probe types.
+func jobProbeHeaderSchemaV0() *pluginsdk.Schema {
+	return &pluginsdk.Schema{
+		Type:     pluginsdk.TypeList,
+		Optional: true,
+		Elem: &pluginsdk.Resource{
+			Schema: map[string]*pluginsdk.Schema{
+				"name": {
+					Type:     pluginsdk.TypeString,
+					Required: true,
+				},
+				"value": {
+					Type:     pluginsdk.TypeString,
+					Required: true,
+				},
+			},
+		},
 	}
+}
 
+// jobLivenessProbeSchemaV0 returns the inlined liveness_probe schema at v0.
+func jobLivenessProbeSchemaV0() *pluginsdk.Schema {
+	return &pluginsdk.Schema{
+		Type:     pluginsdk.TypeList,
+		Optional: true,
+		MinItems: 1,
+		Elem: &pluginsdk.Resource{
+			Schema: map[string]*pluginsdk.Schema{
+				"transport": {
+					Type:     pluginsdk.TypeString,
+					Required: true,
+				},
+				"port": {
+					Type:     pluginsdk.TypeInt,
+					Required: true,
+				},
+				"host": {
+					Type:     pluginsdk.TypeString,
+					Optional: true,
+				},
+				"path": {
+					Type:     pluginsdk.TypeString,
+					Optional: true,
+					Computed: true,
+				},
+				"header": jobProbeHeaderSchemaV0(),
+				"initial_delay": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  1,
+				},
+				"interval_seconds": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  10,
+				},
+				"timeout": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  1,
+				},
+				"failure_count_threshold": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  3,
+				},
+				"termination_grace_period_seconds": {
+					Type:     pluginsdk.TypeInt,
+					Computed: true,
+				},
+			},
+		},
+	}
+}
+
+// jobReadinessProbeSchemaV0 returns the inlined readiness_probe schema at v0.
+func jobReadinessProbeSchemaV0() *pluginsdk.Schema {
+	return &pluginsdk.Schema{
+		Type:     pluginsdk.TypeList,
+		Optional: true,
+		MinItems: 1,
+		Elem: &pluginsdk.Resource{
+			Schema: map[string]*pluginsdk.Schema{
+				"transport": {
+					Type:     pluginsdk.TypeString,
+					Required: true,
+				},
+				"port": {
+					Type:     pluginsdk.TypeInt,
+					Required: true,
+				},
+				"host": {
+					Type:     pluginsdk.TypeString,
+					Optional: true,
+				},
+				"path": {
+					Type:     pluginsdk.TypeString,
+					Optional: true,
+					Computed: true,
+				},
+				"header": jobProbeHeaderSchemaV0(),
+				"initial_delay": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  0,
+				},
+				"interval_seconds": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  10,
+				},
+				"timeout": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  1,
+				},
+				"failure_count_threshold": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  3,
+				},
+				"success_count_threshold": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  3,
+				},
+			},
+		},
+	}
+}
+
+// jobStartupProbeSchemaV0 returns the inlined startup_probe schema at v0.
+func jobStartupProbeSchemaV0() *pluginsdk.Schema {
+	return &pluginsdk.Schema{
+		Type:     pluginsdk.TypeList,
+		Optional: true,
+		MinItems: 1,
+		Elem: &pluginsdk.Resource{
+			Schema: map[string]*pluginsdk.Schema{
+				"transport": {
+					Type:     pluginsdk.TypeString,
+					Required: true,
+				},
+				"port": {
+					Type:     pluginsdk.TypeInt,
+					Required: true,
+				},
+				"host": {
+					Type:     pluginsdk.TypeString,
+					Optional: true,
+				},
+				"path": {
+					Type:     pluginsdk.TypeString,
+					Optional: true,
+					Computed: true,
+				},
+				"header": jobProbeHeaderSchemaV0(),
+				"initial_delay": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  0,
+				},
+				"interval_seconds": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  10,
+				},
+				"timeout": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  1,
+				},
+				"failure_count_threshold": {
+					Type:     pluginsdk.TypeInt,
+					Optional: true,
+					Default:  3,
+				},
+				"termination_grace_period_seconds": {
+					Type:     pluginsdk.TypeInt,
+					Computed: true,
+				},
+			},
+		},
+	}
+}
+
+// jobVolumeMountSchemaV0 returns the inlined volume_mounts schema at v0.
+func jobVolumeMountSchemaV0() *pluginsdk.Schema {
+	return &pluginsdk.Schema{
+		Type:     pluginsdk.TypeList,
+		Optional: true,
+		Elem: &pluginsdk.Resource{
+			Schema: map[string]*pluginsdk.Schema{
+				"name": {
+					Type:     pluginsdk.TypeString,
+					Required: true,
+				},
+				"path": {
+					Type:     pluginsdk.TypeString,
+					Required: true,
+				},
+				"sub_path": {
+					Type:     pluginsdk.TypeString,
+					Optional: true,
+				},
+			},
+		},
+	}
+}
+
+// jobScaleRuleAuthSchemaV0 returns the inlined authentication schema for scale rules.
+func jobScaleRuleAuthSchemaV0() *pluginsdk.Schema {
+	return &pluginsdk.Schema{
+		Type:     pluginsdk.TypeList,
+		Optional: true,
+		MinItems: 1,
+		Elem: &pluginsdk.Resource{
+			Schema: map[string]*pluginsdk.Schema{
+				"secret_name": {
+					Type:     pluginsdk.TypeString,
+					Required: true,
+				},
+				"trigger_parameter": {
+					Type:     pluginsdk.TypeString,
+					Required: true,
+				},
+			},
+		},
+	}
+}
+
+func (ContainerAppJobV0ToV1) Schema() map[string]*pluginsdk.Schema {
 	return map[string]*pluginsdk.Schema{
 		"name": {
 			Type:     pluginsdk.TypeString,
 			Required: true,
 		},
 
-		"resource_group_name": commonschema.ResourceGroupName(),
+		"resource_group_name": {
+			Type:     pluginsdk.TypeString,
+			Required: true,
+		},
 
-		"location": commonschema.Location(),
+		"location": {
+			Type:     pluginsdk.TypeString,
+			Required: true,
+		},
 
 		"container_app_environment_id": {
 			Type:     pluginsdk.TypeString,
@@ -107,15 +326,201 @@ func (ContainerAppJobV0ToV1) Schema() map[string]*pluginsdk.Schema {
 			Optional: true,
 		},
 
-		"template": templateSchema,
+		"template": {
+			Type:     pluginsdk.TypeList,
+			Required: true,
+			MaxItems: 1,
+			Elem: &pluginsdk.Resource{
+				Schema: map[string]*pluginsdk.Schema{
+					"container": {
+						Type:     pluginsdk.TypeList,
+						Required: true,
+						MinItems: 1,
+						Elem: &pluginsdk.Resource{
+							Schema: map[string]*pluginsdk.Schema{
+								"name": {
+									Type:     pluginsdk.TypeString,
+									Required: true,
+								},
+								"image": {
+									Type:     pluginsdk.TypeString,
+									Required: true,
+								},
+								"cpu": {
+									Type:     pluginsdk.TypeFloat,
+									Required: true,
+								},
+								"memory": {
+									Type:     pluginsdk.TypeString,
+									Required: true,
+								},
+								"ephemeral_storage": {
+									Type:     pluginsdk.TypeString,
+									Computed: true,
+								},
+								"env": jobEnvSchemaV0(),
+								"args": {
+									Type:     pluginsdk.TypeList,
+									Optional: true,
+									Elem: &pluginsdk.Schema{
+										Type: pluginsdk.TypeString,
+									},
+								},
+								"command": {
+									Type:     pluginsdk.TypeList,
+									Optional: true,
+									Elem: &pluginsdk.Schema{
+										Type: pluginsdk.TypeString,
+									},
+								},
+								"liveness_probe":  jobLivenessProbeSchemaV0(),
+								"readiness_probe": jobReadinessProbeSchemaV0(),
+								"startup_probe":   jobStartupProbeSchemaV0(),
+								"volume_mounts":   jobVolumeMountSchemaV0(),
+							},
+						},
+					},
+
+					"init_container": {
+						Type:     pluginsdk.TypeList,
+						Optional: true,
+						MinItems: 1,
+						Elem: &pluginsdk.Resource{
+							Schema: map[string]*pluginsdk.Schema{
+								"name": {
+									Type:     pluginsdk.TypeString,
+									Required: true,
+								},
+								"image": {
+									Type:     pluginsdk.TypeString,
+									Required: true,
+								},
+								"cpu": {
+									Type:     pluginsdk.TypeFloat,
+									Optional: true,
+								},
+								"memory": {
+									Type:     pluginsdk.TypeString,
+									Optional: true,
+								},
+								"ephemeral_storage": {
+									Type:     pluginsdk.TypeString,
+									Computed: true,
+								},
+								"env": jobEnvSchemaV0(),
+								"args": {
+									Type:     pluginsdk.TypeList,
+									Optional: true,
+									Elem: &pluginsdk.Schema{
+										Type: pluginsdk.TypeString,
+									},
+								},
+								"command": {
+									Type:     pluginsdk.TypeList,
+									Optional: true,
+									Elem: &pluginsdk.Schema{
+										Type: pluginsdk.TypeString,
+									},
+								},
+								"volume_mounts": jobVolumeMountSchemaV0(),
+							},
+						},
+					},
+
+					"volume": {
+						Type:     pluginsdk.TypeList,
+						Optional: true,
+						MinItems: 1,
+						Elem: &pluginsdk.Resource{
+							Schema: map[string]*pluginsdk.Schema{
+								"name": {
+									Type:     pluginsdk.TypeString,
+									Required: true,
+								},
+								"storage_type": {
+									Type:     pluginsdk.TypeString,
+									Optional: true,
+									Default:  "EmptyDir",
+								},
+								"storage_name": {
+									Type:     pluginsdk.TypeString,
+									Optional: true,
+								},
+								"mount_options": {
+									Type:     pluginsdk.TypeString,
+									Optional: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 
 		"secret": jobSecretSchemaV0(),
 
-		"registry": helpers.ContainerAppRegistrySchema(),
+		"registry": {
+			Type:     pluginsdk.TypeList,
+			MinItems: 1,
+			Optional: true,
+			Elem: &pluginsdk.Resource{
+				Schema: map[string]*pluginsdk.Schema{
+					"server": {
+						Type:     pluginsdk.TypeString,
+						Required: true,
+					},
+					"username": {
+						Type:     pluginsdk.TypeString,
+						Optional: true,
+					},
+					"password_secret_name": {
+						Type:     pluginsdk.TypeString,
+						Optional: true,
+					},
+					"identity": {
+						Type:     pluginsdk.TypeString,
+						Optional: true,
+					},
+				},
+			},
+		},
 
-		"identity": commonschema.SystemAssignedUserAssignedIdentityOptional(),
+		"identity": {
+			Type:     pluginsdk.TypeList,
+			Optional: true,
+			MaxItems: 1,
+			Elem: &pluginsdk.Resource{
+				Schema: map[string]*pluginsdk.Schema{
+					"type": {
+						Type:     pluginsdk.TypeString,
+						Required: true,
+					},
+					"identity_ids": {
+						Type:     pluginsdk.TypeSet,
+						Optional: true,
+						Elem: &pluginsdk.Schema{
+							Type: pluginsdk.TypeString,
+						},
+					},
+					"principal_id": {
+						Type:     pluginsdk.TypeString,
+						Computed: true,
+					},
+					"tenant_id": {
+						Type:     pluginsdk.TypeString,
+						Computed: true,
+					},
+				},
+			},
+		},
 
-		"tags": commonschema.Tags(),
+		"tags": {
+			Type:     pluginsdk.TypeMap,
+			Optional: true,
+			Elem: &pluginsdk.Schema{
+				Type: pluginsdk.TypeString,
+			},
+		},
 
 		"outbound_ip_addresses": {
 			Type:     pluginsdk.TypeList,
@@ -155,7 +560,57 @@ func (ContainerAppJobV0ToV1) Schema() map[string]*pluginsdk.Schema {
 						Type:     pluginsdk.TypeInt,
 						Optional: true,
 					},
-					"scale": helpers.ContainerAppsJobsScaleSchema(),
+					"scale": {
+						Type:     pluginsdk.TypeList,
+						Optional: true,
+						Elem: &pluginsdk.Resource{
+							Schema: map[string]*pluginsdk.Schema{
+								"max_executions": {
+									Type:     pluginsdk.TypeInt,
+									Optional: true,
+									Default:  100,
+								},
+								"min_executions": {
+									Type:     pluginsdk.TypeInt,
+									Optional: true,
+									Default:  0,
+								},
+								"polling_interval_in_seconds": {
+									Type:     pluginsdk.TypeInt,
+									Optional: true,
+									Default:  30,
+								},
+								"rules": {
+									Type:     pluginsdk.TypeList,
+									Optional: true,
+									Elem: &pluginsdk.Resource{
+										Schema: map[string]*pluginsdk.Schema{
+											"name": {
+												Type:     pluginsdk.TypeString,
+												Required: true,
+											},
+											"metadata": {
+												Type:     pluginsdk.TypeMap,
+												Required: true,
+												Elem: &pluginsdk.Schema{
+													Type: pluginsdk.TypeString,
+												},
+											},
+											"custom_rule_type": {
+												Type:     pluginsdk.TypeString,
+												Required: true,
+											},
+											"authentication": jobScaleRuleAuthSchemaV0(),
+											"identity_id": {
+												Type:     pluginsdk.TypeString,
+												Optional: true,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 		},
@@ -167,9 +622,8 @@ func (ContainerAppJobV0ToV1) Schema() map[string]*pluginsdk.Schema {
 			Elem: &pluginsdk.Resource{
 				Schema: map[string]*pluginsdk.Schema{
 					"cron_expression": {
-						Type:         pluginsdk.TypeString,
-						Required:     true,
-						ValidateFunc: validation.StringIsNotEmpty,
+						Type:     pluginsdk.TypeString,
+						Required: true,
 					},
 					"parallelism": {
 						Type:     pluginsdk.TypeInt,
