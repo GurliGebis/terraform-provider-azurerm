@@ -1010,6 +1010,8 @@ func flattenContainerAppJobScaleRulesAuth(input *[]jobs.ScaleRuleAuth) []ScaleRu
 	return result
 }
 
+// FlattenContainerAppJobSecrets is the job-specific variant of FlattenContainerAppSecrets.
+// Same logic: API doesn't return plain values, and may return "" instead of nil for KeyVaultURL.
 func FlattenContainerAppJobSecrets(input *jobs.JobSecretsCollection) []Secret {
 	if input == nil || input.Value == nil {
 		return []Secret{}
