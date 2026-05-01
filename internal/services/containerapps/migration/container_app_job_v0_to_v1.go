@@ -11,6 +11,8 @@ import (
 
 type ContainerAppJobV0ToV1 struct{}
 
+// jobEnvSchemaV0 is a point-in-time snapshot of the job env schema before v1.
+// Must remain static: TypeList, MinItems:1, no Default.
 func jobEnvSchemaV0() *pluginsdk.Schema {
 	return &pluginsdk.Schema{
 		Type:     pluginsdk.TypeList,
@@ -35,6 +37,8 @@ func jobEnvSchemaV0() *pluginsdk.Schema {
 	}
 }
 
+// jobSecretSchemaV0 is a point-in-time snapshot of the job secret schema before v1.
+// Key differences from v1: set-level Sensitive:true, no Default:"" on optional fields.
 func jobSecretSchemaV0() *pluginsdk.Schema {
 	return &pluginsdk.Schema{
 		Type:      pluginsdk.TypeSet,
@@ -666,6 +670,7 @@ func (ContainerAppJobV0ToV1) UpgradeFunc() pluginsdk.StateUpgraderFunc {
 	}
 }
 
+// normalizeJobEnvVars converts nil values to "" for env var fields that gained Default:"" in v1.
 func normalizeJobEnvVars(rawState map[string]interface{}) {
 	templates, _ := rawState["template"].([]interface{})
 	for _, tmpl := range templates {
@@ -698,6 +703,7 @@ func normalizeJobEnvVars(rawState map[string]interface{}) {
 	}
 }
 
+// normalizeJobSecrets converts nil values to "" for secret fields that gained Default:"" in v1.
 func normalizeJobSecrets(rawState map[string]interface{}) {
 	secrets, _ := rawState["secret"].([]interface{})
 	for _, s := range secrets {
